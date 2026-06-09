@@ -293,6 +293,12 @@ class MicromagneticSystem:
         self.set_demag_field(True)
         self.set_spin_damping(0)
         self.set_orbital_damping(0)
+        self.Ms = np.zeros((2, self.mesh.N))
+        self.set_bc("Neumann")
+
+    def set_bc(self, bc):
+        self.bc = bc
+        print("Set boundary conditions to ", bc)
 
     def set_spin_magnetization(self, Ms):
         """
@@ -303,7 +309,7 @@ class MicromagneticSystem:
           - a flattened vector the same length as the flattened mesh 
           - a function of exactly 3 variables (x,y,z). Note that this needs to be mesh compatible  
         """
-        self.Ms_S = self.mesh.set_values_on_mesh(Ms, "Spin Magnetization")
+        self.Ms[0,:] = self.mesh.set_values_on_mesh(Ms, "Spin Magnetization")
 
     def set_orbital_magnetization(self, Ms):
         """
@@ -314,7 +320,7 @@ class MicromagneticSystem:
           - a flattened vector the same length as the flattened mesh 
           - a function of exactly 3 variables (x,y,z). Note that this needs to be mesh compatible  
         """
-        self.Ms_L = self.mesh.set_values_on_mesh(Ms, "Orbital Magnetization")
+        self.Ms[1,:] = self.mesh.set_values_on_mesh(Ms, "Orbital Magnetization")
 
     def set_external_field(self, Bext, ux, uy, uz):
         """
@@ -507,11 +513,11 @@ class MicromagneticSystem:
           - a flattened vector the same length as the flattened mesh 
           - a function of exactly 3 variables (x,y,z). Note that this needs to be mesh compatible  
         """
-        if not hasattr(self, "Ms_S") or not hasattr(self, "Ms_L") or not hasattr(self, "gS") or not hasattr(self, "gL"):
+        if not hasattr(self, "Ms") or not hasattr(self, "Ms") or not hasattr(self, "gS") or not hasattr(self, "gL"):
             return ValueError("Magnetizations or g-factors not defined")
         self.Bso = self.mesh.set_values_on_mesh(Bso, "spin-orbit field")
 
-    def set_exchange_interaction(self, A):
+    def set_SS_exchange(self, A):
         """
         Define the nearest neighbour exchange interaction over the mesh.
         This term only acts on the spin degrees of freedom and calling this function requires having defined a spin magnetization. 
@@ -521,9 +527,37 @@ class MicromagneticSystem:
           - a flattened vector the same length as the flattened mesh 
           - a function of exactly 3 variables (x,y,z). Note that this needs to be mesh compatible  
         """
-        if not hasattr(self, "Ms_S"):
+        if not hasattr(self, "Ms"):
             return ValueError("Spin magnetization not defined")
-        self.A = self.mesh.set_values_on_mesh(A, "first neighbor exchange")
+        self.A_SS = self.mesh.set_values_on_mesh(A, "first neighbor SS exchange")
+
+    def set_LS_exchange(self, A):
+        """
+        Define the nearest neighbour exchange interaction over the mesh.
+        This term only acts on the spin degrees of freedom and calling this function requires having defined a spin magnetization. 
+        The only input can either be:
+          - a scalar
+          - a vector of the same shape as the mesh
+          - a flattened vector the same length as the flattened mesh 
+          - a function of exactly 3 variables (x,y,z). Note that this needs to be mesh compatible  
+        """
+        if not hasattr(self, "Ms"):
+            return ValueError("Spin magnetization not defined")
+        self.A_LS = self.mesh.set_values_on_mesh(A, "first neighbor LS exchange")
+
+    def set_LL_exchange(self, A):
+        """
+        Define the nearest neighbour exchange interaction over the mesh.
+        This term only acts on the spin degrees of freedom and calling this function requires having defined a spin magnetization. 
+        The only input can either be:
+          - a scalar
+          - a vector of the same shape as the mesh
+          - a flattened vector the same length as the flattened mesh 
+          - a function of exactly 3 variables (x,y,z). Note that this needs to be mesh compatible  
+        """
+        if not hasattr(self, "Ms"):
+            return ValueError("Spin magnetization not defined")
+        self.A_LL = self.mesh.set_values_on_mesh(A, "first neighbor LL exchange")
 
     def set_demag_field(self, on: bool = True):
         self.usedemag = on

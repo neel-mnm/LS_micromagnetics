@@ -8,6 +8,18 @@ import factories as mmfct
 def is_constant(arr):
     return np.allclose(arr, arr.flat[0])
 
+def harmonic_mean(A,B):
+    return 2*A*B/(A+B)
+
+@njit(inline = "always")
+def exchange_stencil(pref, A_c, A_px, A_py, A_pz, A_mx, A_my, A_mz, Sx_px, Sx, Sx_py, Sx_pz, Sx_mx, Sx_my, Sx_mz, two_over_dx2, two_over_dy2, two_over_dz2):
+    return pref * (
+                                (A_px*(Sx_px-Sx)/(A_px+A_c) + A_mx*(Sx_mx-Sx)/(A_mx+A_c))*two_over_dx2 +
+                                (A_py*(Sx_py-Sx)/(A_py+A_c) + A_my*(Sx_my-Sx)/(A_my+A_c))*two_over_dy2 +
+                                (A_pz*(Sx_pz-Sx)/(A_pz+A_c) + A_mz*(Sx_mz-Sx)/(A_mz+A_c))*two_over_dz2 
+                            )
+
+
 def make_noField(varNum, outNum = 6):
     match varNum: 
         case 4:
@@ -96,7 +108,7 @@ def RK4_stream_integrator(J0, t0, tf, dt, func, save_every=100, normalize_every 
     k3 = np.zeros_like(J0)
     k4 = np.zeros_like(J0)
 
-    laplacian = np.empty((3, N))
+    laplacian = np.zeros((6, N))
     B = np.zeros_like(J0)
 
     y = J0.copy()

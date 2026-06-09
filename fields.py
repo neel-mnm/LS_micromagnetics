@@ -51,20 +51,6 @@ def make_field_uniaxial(Bk,kx0,ky0,kz0,onS):
     return field_anisotropy_uniaxial
 
 
-def make_field_exchange(Bex):
-    if Bex is None:
-        return utils.make_noField(4, outNum=3)
-    if utils.is_constant(Bex):
-        Bex_i = float(Bex[0])
-        @njit(inline = "always")
-        def field_exchange(lap_x, lap_y, lap_z,i):
-            return Bex_i*lap_x,Bex_i*lap_y,Bex_i*lap_z
-    else:
-        @njit(inline = "always")
-        def field_exchange(lap_x, lap_y, lap_z,i):
-            return Bex[i]*lap_x,Bex[i]*lap_y,Bex[i]*lap_z
-    return field_exchange
-
 
 def make_field_oersted(BOe, ux = None, uy = None, uz = None):
     if ux is None:
@@ -127,6 +113,133 @@ def make_field_dampinglike(Bdl, ux, uy, uz):
         cx, cy, cz = bz*Jy - by*Jz,-bz*Jx + bx*Jz,by*Jx - bx*Jy
         return cx, cy, cz
     return field_dampinglike
+
+
+## DEPRACATED
+def make_field_exchange(A, Ms, dx = 0, dy = 0 , dz = 0, Nx = 1, Ny=1, Nz = 1):
+    if A is None and Ms is None:
+        return utils.make_noField(4, outNum=3)
+    Bex = 2 * A / Ms
+    if utils.is_constant(Bex):
+        Bex_i = float(Bex[0])
+        @njit(inline = "always")
+        def field_exchange(lap_x, lap_y, lap_z,i):
+            return Bex_i*lap_x,Bex_i*lap_y,Bex_i*lap_z
+        return field_exchange
+
+
+def make_field_exchange_sublattices(A, Ms, Nx, Ny, Nz, dx, dy, dz, reciever = "S", source = "L", bc = "Neumann"):
+        two_over_dx2 = 2/dx**2
+        two_over_dy2 = 2/dy**2
+        two_over_dz2 = 2/dz**2
+        two_over_Ms = 2/Ms
+        
+        iy = Nx
+        iz = Nx * Ny
+
+        if reciever == "S":
+            x1 = 0
+            y1 = 1
+            z1 = 2
+            m = 0
+        else:
+            x1 = 0+3
+            y1 = 1+3
+            z1 = 2+3
+            m = 1
+
+        if source == "S":
+            x2 = 0
+            y2 = 1
+            z2 = 2
+        else:
+            x2 = 0+3
+            y2 = 1+3
+            z2 = 2+3
+
+        if bc == "Neumann":
+            @njit(inline="always")
+            def idx(i, n):
+                if i < 0:
+                    return 0
+                elif i >= n:
+                    return n - 1
+                return i
+
+        elif bc == "Periodic":
+            @njit(inline="always")
+            def idx(i, n):
+                if i < 0:
+                    return n - 1
+                elif i >= n:
+                    return 0
+                return i
+        
+        if bc == "pass":
+            def update_field_exchange(J,Bex):
+                pass
+
+        @njit
+        def update_field_exchange(J, B_ex):
+            
+            for i in range(Nx):
+                for j in range(Ny):
+                    for k in range(Nz):
+                        
+
+                        ip = idx(i+1,Nx)
+                        im = idx(i-1,Nx)
+
+                        jp = idx(j+1,Ny)
+                        jm = idx(j-1,Ny)
+
+                        kp = idx(k+1,Nz)
+                        km = idx(k-1,Nz)
+
+                        p = i + j*iy + k*iz
+
+                        ppx = ip + j*iy + k*iz
+                        pmx = im + j*iy + k*iz
+
+                        ppy = i + jp*iy + k*iz
+                        pmy = i + jm*iy + k*iz
+
+                        ppz = i + j*iy + kp*iz
+                        pmz = i + j*iy + km*iz
+
+
+                        
+                        A_c = A[p]
+                        A_px = A[ppx]
+                        A_mx = A[pmx]
+                        A_py = A[ppy]
+                        A_my = A[pmy]
+                        A_pz = A[ppz]
+                        A_mz = A[pmz]
+                        pref = two_over_Ms[m,p] * A_c / mu0
+                        #actual cell
+                        Sx,Sy,Sz = J[x2,p],J[y2,p],J[z2,p]   
+                        # X neighbours
+                        Sx_px,Sy_px,Sz_px = J[x2,ppx],J[y2,ppx],J[z2,ppx]
+                        Sx_mx,Sy_mx,Sz_mx = J[x2,pmx],J[y2,pmx],J[z2,pmx] 
+                        # Y neighbours
+                        Sx_py,Sy_py,Sz_py = J[x2,ppy],J[y2,ppy],J[z2,ppy]
+                        Sx_my,Sy_my,Sz_my = J[x2,pmy],J[y2,pmy],J[z2,pmy]
+                        # Z neighbours
+                        Sx_pz,Sy_pz,Sz_pz = J[x2,ppz],J[y2,ppz],J[z2,ppz] 
+                        Sx_mz,Sy_mz,Sz_mz = J[x2,pmz],J[y2,pmz],J[z2,pmz]
+                        
+                        B_ex[x1,p] += utils.exchange_stencil(pref, A_c, A_px, A_py, A_pz, A_mx, A_my, A_mz, Sx_px, Sx, Sx_py, Sx_pz, Sx_mx, Sx_my, Sx_mz, two_over_dx2, two_over_dy2, two_over_dz2)
+                        B_ex[y1,p] += utils.exchange_stencil(pref, A_c, A_px, A_py, A_pz, A_mx, A_my, A_mz, Sy_px, Sy, Sy_py, Sy_pz, Sy_mx, Sy_my, Sy_mz, two_over_dx2, two_over_dy2, two_over_dz2)
+                        B_ex[z1,p] += utils.exchange_stencil(pref, A_c, A_px, A_py, A_pz, A_mx, A_my, A_mz, Sz_px, Sz, Sz_py, Sz_pz, Sz_mx, Sz_my, Sz_mz, two_over_dx2, two_over_dy2, two_over_dz2)
+        
+        return update_field_exchange
+    #else:
+    #    #deprecated, wrong physical behaviour
+    #    @njit(inline = "always")
+    #    def field_exchange(lap_x, lap_y, lap_z,i):
+    #        return Bex[i]*lap_x,Bex[i]*lap_y,Bex[i]*lap_z
+
 
 def make_field_demag_from_tensor(Nx, Ny, Nz, MS, ML):
     Bs = mu0 * MS

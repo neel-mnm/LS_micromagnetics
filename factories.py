@@ -7,20 +7,93 @@ from numba.core.registry import CPUDispatcher
 def make_effective_field(system : MicromagneticSystem):
 
     print("Building effective field")
+    bc = system.bc
 
     if system.mesh.dim != 0:
-        update_laplacian = system.mesh.get_laplacian_updater()
+        Nx, Ny, Nz = system.mesh.shape
+        dx, dy, dz = system.mesh.dx,system.mesh.dy,system.mesh.dz
+        Ms = system.Ms
+        useSS = False
+        useLS = False
+        useLL = False
+        if hasattr(system, "A_SS"):
+            print("Introduced S-S exchange")
+            A_SS = system.A_SS
+            update_field_exchange_SS = make_field_exchange_sublattices(A_SS,Ms,Nx,Ny,Nz,dx,dy,dz,reciever="S", source = "S", bc = bc)
+            useSS = True
 
+        if hasattr(system, "A_LS"):
+            print("Introduced L-S exchange")
+            A_LS = system.A_LS
+            update_field_exchange_LS = make_field_exchange_sublattices(A_LS,Ms,Nx,Ny,Nz,dx,dy,dz,reciever="S", source = "L", bc = bc)
+            update_field_exchange_SL = make_field_exchange_sublattices(A_LS,Ms,Nx,Ny,Nz,dx,dy,dz,reciever="L", source = "S", bc = bc)
+            useLS = True
+        
+        if hasattr(system, "A_LL"):
+            print("Introduced L-L exchange")
+            A_LL = system.A_LL
+            update_field_exchange_LL = make_field_exchange_sublattices(A_LL,Ms,Nx,Ny,Nz,dx,dy,dz,reciever="L", source = "L", bc = bc)
+            useLL = True
 
-        if hasattr(system, "A") and hasattr(system, "Ms_S"):
-            Bex = 2*system.A/(system.Ms_S)
-            update_field_exchange = make_field_exchange(Bex)
+        if useSS and useLS and useLL:
+            @njit
+            def update_exchange(J,B_ex):
+                B_ex[:] = 0.0
+                update_field_exchange_SS(J, B_ex)
+                update_field_exchange_LS(J, B_ex)
+                update_field_exchange_SL(J, B_ex)
+                update_field_exchange_LL(J, B_ex)
+
+        elif useSS and useLS:
+            @njit
+            def update_exchange(J,B_ex):
+                B_ex[:] = 0.0
+                update_field_exchange_SS(J, B_ex)
+                update_field_exchange_LS(J, B_ex)
+                update_field_exchange_SL(J, B_ex)
+
+        elif useSS and useLL:
+            @njit
+            def update_exchange(J,B_ex):
+                B_ex[:] = 0.0
+                update_field_exchange_SS(J, B_ex)
+                update_field_exchange_LL(J, B_ex)
+
+        elif useLL and useLS:
+            @njit
+            def update_exchange(J,B_ex):
+                B_ex[:] = 0.0
+                update_field_exchange_LL(J, B_ex)
+                update_field_exchange_LS(J, B_ex)
+                update_field_exchange_SL(J, B_ex)
+        
+        elif useSS:
+            @njit
+            def update_exchange(J,B_ex):
+                B_ex[:] = 0.0
+                update_field_exchange_SS(J, B_ex)
+        
+        elif useLL:
+            @njit
+            def update_exchange(J,B_ex):
+                B_ex[:] = 0.0
+                update_field_exchange_LL(J, B_ex)
+        
+        elif useLS:
+            @njit
+            def update_exchange(J,B_ex):
+                B_ex[:] = 0.0
+                update_field_exchange_LS(J, B_ex)
+                update_field_exchange_SL(J, B_ex)
+
         else:
-            if not hasattr(system, "A"):
-                print("System has undefined exchange stiffness. Setting exchange to zero")
-            if not hasattr(system, "Ms_S"):
-                print("System has undefined magnetization, can't define exchange field. Defaulting to zero")
-            update_field_exchange = make_field_exchange(None)
+            print("No Exchange introduced")
+            @njit
+            def update_exchange(J, B_ex):
+
+                return
+            
+        print("Exchange field built")
         
     if hasattr(system, "B0"):
         print("Building external field")
@@ -50,8 +123,8 @@ def make_effective_field(system : MicromagneticSystem):
     
     if hasattr(system, "Bso"):
         Bso = system.Bso
-        Ms_S = system.Ms_S
-        Ms_L = system.Ms_L
+        Ms_S = system.Ms[0,:]
+        Ms_L = system.Ms[1,:]
         gL = system.gL
         gS = system.gS
         update_field_spinorbit = make_field_spinorbit(Bso, Ms_S, Ms_L, gL, gS)
@@ -87,13 +160,13 @@ def make_effective_field(system : MicromagneticSystem):
         update_dampinglike_orbital = utils.make_noField(5, outNum=3)
 
     if hasattr(system, "Nxx"):
-        if hasattr(system, "Ms_S"):
-            MsS = system.Ms_S 
+        if hasattr(system, "Ms"):
+            MsS = system.Ms[0,:] 
         else:
             MsS = np.zeros_like(system.Nxx)
             
-        if hasattr(system, "Ms_L"):
-            MsL = system.Ms_L 
+        if hasattr(system, "Ms"):
+            MsL = system.Ms[1,:] 
         else:
             MsL = np.zeros_like(system.Nxx)
         Nxx = system.N_xx
@@ -102,13 +175,13 @@ def make_effective_field(system : MicromagneticSystem):
         update_field_demag = make_field_demag(None, None, None, None, None, None, MsS,MsL,Nxx,Nyy,Nzz, convolution=False)
     elif system.usedemag:
         print("Building demag field")
-        if hasattr(system, "Ms_S"):
-            MsS = system.Ms_S 
+        if hasattr(system, "Ms"):
+            MsS = system.Ms[0,:] 
         else:
             MsS = np.zeros(system.mesh.N)
             
-        if hasattr(system, "Ms_L"):
-            MsL = system.Ms_L 
+        if hasattr(system, "Ms"):
+            MsL = system.Ms[1,:] 
         else:
             MsL = np.zeros(system.mesh.N)
         Kxx, Kyy, Kzz, Kxy, Kxz, Kyz = system.mesh._get_reciprocal_demag_kernel()
@@ -164,8 +237,8 @@ def make_effective_field(system : MicromagneticSystem):
         return field_effective
     else:
         @njit(inline = "always")
-        def field_effective(B, I, J, laplacian):
-            update_laplacian(laplacian,J)
+        def field_effective(B, I, J, B_ex):
+            update_exchange(J, B_ex)
             demX, demY, demZ = update_field_demag(J[0,:],J[1,:],J[2,:],J[3,:],J[4,:],J[5,:])
 
             for i in range(N):
@@ -182,6 +255,15 @@ def make_effective_field(system : MicromagneticSystem):
                 kx +=demX[i]
                 ky +=demY[i]
                 kz +=demZ[i]
+
+                
+                hx +=B_ex[0,i]
+                hy +=B_ex[1,i]
+                hz +=B_ex[2,i]
+                
+                kx +=B_ex[3,i]
+                ky +=B_ex[4,i]
+                kz +=B_ex[5,i]
 
                 Sx,Sy,Sz = J[0,i],J[1,i],J[2,i]
                 Lx,Ly,Lz = J[3,i],J[4,i],J[5,i]            
@@ -203,10 +285,6 @@ def make_effective_field(system : MicromagneticSystem):
                 bx,by,bz,cx,cy,cz=update_field_spinorbit(Sx,Sy,Sz,Lx,Ly,Lz, i)
                 hx+=bx; hy+=by; hz+=bz;kx+=cx; ky+=cy; kz+=cz
 
-
-                lapX, lapY, lapZ = laplacian[0,i],laplacian[1,i],laplacian[2,i]
-                bx,by,bz=update_field_exchange(lapX, lapY, lapZ,i)
-                hx+=bx; hy+=by; hz+=bz
 
 
                 bx,by,bz = update_fieldlike_spin(Ii,i)

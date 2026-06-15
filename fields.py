@@ -132,7 +132,9 @@ def make_field_exchange_sublattices(A, Ms, Nx, Ny, Nz, dx, dy, dz, reciever = "S
         two_over_dx2 = 2/dx**2
         two_over_dy2 = 2/dy**2
         two_over_dz2 = 2/dz**2
-        two_over_Ms = 2/Ms
+        two_over_Ms = np.zeros_like(Ms, dtype=float)
+        mask = Ms != 0
+        two_over_Ms[mask] = 2 / Ms[mask]
         
         iy = Nx
         iz = Nx * Ny
@@ -177,7 +179,7 @@ def make_field_exchange_sublattices(A, Ms, Nx, Ny, Nz, dx, dy, dz, reciever = "S
         
         if bc == "pass":
             def update_field_exchange(J,Bex):
-                pass
+                return
 
         @njit
         def update_field_exchange(J, B_ex):
@@ -216,7 +218,7 @@ def make_field_exchange_sublattices(A, Ms, Nx, Ny, Nz, dx, dy, dz, reciever = "S
                         A_my = A[pmy]
                         A_pz = A[ppz]
                         A_mz = A[pmz]
-                        pref = two_over_Ms[m,p] * A_c / mu0
+                        pref = two_over_Ms[m,p] * A_c 
                         #actual cell
                         Sx,Sy,Sz = J[x2,p],J[y2,p],J[z2,p]   
                         # X neighbours
@@ -317,5 +319,9 @@ def make_field_demag(Kxx, Kyy, Kzz, Kxy, Kxz, Kyz, MS, ML, Nx, Ny, Nz, convoluti
 
     return update_field_demag
 
-
+def make_no_demag(zero):
+    @njit
+    def update_field_demag(Sx,Sy,Sz,Lx,Ly,Lz):
+        return zero, zero, zero
+    return update_field_demag
 

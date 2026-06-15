@@ -503,6 +503,10 @@ class MicromagneticSystem:
     def set_orbital_damping(self, alpha_L):
         self.alphaL = self.mesh.set_values_on_mesh(alpha_L, "orbital Gilbert damping")
 
+    def set_cross_damping(self, alpha_LS):
+        self.alphaLS = self.mesh.set_values_on_mesh(alpha_LS, "cross Gilbert damping")
+
+
     def set_spinorbit_field(self,Bso):
         """
         Define the local spin-orbit interaction over the mesh. This means the interaction between L and S within the same node.
@@ -587,6 +591,8 @@ class MicromagneticSystem:
         self.J = mmutils.jitter(self.J, eps)
 
 
-    def time_evolution(self, tf, dt, t0 = 0, dynamics = "full", save_every = 100, stream = True, normalize_every = 10, fmrFieldFunction = None):
-        return mmutils.timeEvol(self.J,self,fmrFieldFunction=fmrFieldFunction, tf = tf, dt = dt, t0=t0, dynamics=dynamics, save_every=save_every, stream = stream, normalize_every=normalize_every)
-        
+    def time_evolution(self, tf, dt, t0 = 0, dynamics = "full", save_every = 100, stream = True, normalize_every = 10, fmrFieldFunction = None, solver = "RK4", tol = 1e-6, max_iter = 10, omega = .5):
+        if solver == "RK4":
+            return mmutils.timeEvol(self.J,self,fmrFieldFunction=fmrFieldFunction, tf = tf, dt = dt, t0=t0, dynamics=dynamics, save_every=save_every, stream = stream, normalize_every=normalize_every)
+        elif solver == "picard":
+            return mmutils.timeEvol(self.J, self, fmrFieldFunction, tf, dt, t0, dynamics, save_every, stream, normalize_every, picard=True, tol = tol, max_iter = max_iter, omega = omega)

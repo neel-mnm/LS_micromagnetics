@@ -97,6 +97,112 @@ def jitter(J, eps=1e-5):
 
     return Jj
 
+@njit(inline = "always")
+def cross_product_matrix(M):
+    return np.array([
+        [0, -M[2], M[1]],
+        [M[2], 0 ,-M[0]],
+        [-M[1], M[0], 0]
+    ])
+
+@njit(inline = "always")
+def update_implicit_gilbert_matrix(J, alpha_S, alpha_L, alpha_LS, gilbert_matrix):
+    gilbert_matrix[:3,:3] = -alpha_S * cross_product_matrix(J[:3]) + np.eye(3)    
+    gilbert_matrix[:3,3:] = -alpha_LS * cross_product_matrix(J[:3]) 
+    gilbert_matrix[3:,3:] = -alpha_L * cross_product_matrix(J[3:]) + np.eye(3)
+    gilbert_matrix[3:,:3] = -alpha_LS * cross_product_matrix(J[3:]) 
+
+@njit
+def picard_integrator(J0, tf, dt, LLG_prec, alpha_S, alpha_L, alpha_LS, tol = 1e-6, max_iter = 10, t0 = 0, save_every = 1, normalize_every = 10, omega = .5):
+    n_step = int((tf - t0) / dt)
+    N = J0.shape[1]
+
+    prec = np.zeros_like(J0)
+    B = np.zeros_like(J0)
+    Bex = np.zeros_like(J0)
+
+    Jk = J0.copy()
+    t = t0
+    tmp = np.zeros_like(J0)
+
+    if save_every != -1:
+        n_save = n_step // save_every + 1
+        J_save = np.empty((6, N, n_save), dtype=np.float64)
+        t_save = np.empty(n_save, dtype=np.float64)
+
+        save_idx = 0
+        J_save[:, :, save_idx] = Jk
+        t_save[save_idx] = t0
+        save_idx += 1
+    else:
+        J_save = np.empty((6, N, 2), dtype=np.float64)
+        t_save = np.empty(2, dtype=np.float64)
+
+    if not np.all(np.isfinite(Jk)):
+        print("bad Jk", "initial")
+
+    G = np.empty((6,6), dtype=np.float64)
+    for timestep in range(n_step):
+        J_old = Jk.copy()
+        
+        for it in range(max_iter):
+            max_err = 0.0
+            LLG_prec(t, Jk, B, prec, Bex)
+
+            for n in range(N):
+                alphaL = alpha_L[n]
+                alphaS = alpha_S[n]
+                alphaLS = alpha_LS[n]
+                update_implicit_gilbert_matrix(Jk[:,n], alphaS, alphaL,alphaLS,G)
+                if not np.all(np.isfinite(prec)):
+                    print("bad prec", timestep, it, prec)
+                
+                if not np.all(Bex<1e200):
+                    print(Bex)
+
+                
+                dJ = np.linalg.solve(G, prec[:,n]) * dt
+
+                tmp[:,n] = J_old[:,n] + dJ
+
+                err = np.max(np.abs(tmp[:,n]-Jk[:,n]))
+                
+                if err > max_err:
+                    max_err = err
+
+
+            Jk[:,:] = omega * tmp[:,:] + (1-omega)*Jk[:,:]
+            if max_err < tol:
+                break
+
+        t+=dt
+        if normalize_every != -1 and timestep % normalize_every == 0:
+
+            for j in range(N):
+
+                sx, sy, sz = Jk[0,j], Jk[1,j], Jk[2,j]
+                sn = (sx*sx + sy*sy + sz*sz)**0.5 + 1e-12
+                Jk[0,j] = sx/sn
+                Jk[1,j] = sy/sn
+                Jk[2,j] = sz/sn
+
+                lx, ly, lz = Jk[3,j], Jk[4,j], Jk[5,j]
+                ln = (lx*lx + ly*ly + lz*lz)**0.5 + 1e-12
+                Jk[3,j] = lx/ln
+                Jk[4,j] = ly/ln
+                Jk[5,j] = lz/ln
+
+        if save_every != -1:
+            if timestep % save_every == 0:
+                J_save[:, :, save_idx] = Jk
+                t_save[save_idx] = t
+                save_idx += 1
+
+    return t_save, J_save
+
+
+
+
 @njit
 def RK4_stream_integrator(J0, t0, tf, dt, func, save_every=100, normalize_every = -1):
 
@@ -182,8 +288,6 @@ def RK4_stream_integrator(J0, t0, tf, dt, func, save_every=100, normalize_every 
         J_save[:,:,1] = y
         t_save[0] = 0
 
-    print(t_save, J_save)
-
     return t_save, J_save
 
 @njit
@@ -263,13 +367,22 @@ def RK4_integrator(J0, t0, tf, dt, func, normalize_every = -1):
     
     return t_save, J_save
 
-
-def timeEvol(J0, system: mmcls.MicromagneticSystem, fmrFieldFunction, tf, dt = 1e-10, t0 = 0, dynamics = "full", save_every = 100, stream = False, normalize_every = -1):
-    LLGs = mmfct.get_LLGs(system, dynamics, fmrFieldFunction)
+def timeEvol(J0, system: mmcls.MicromagneticSystem, fmrFieldFunction, tf, dt = 1e-10, t0 = 0, dynamics = "full", save_every = 100, stream = False, normalize_every = -1, picard = False, tol = 1e-6, max_iter = 10, omega=.5):
+    
+    if picard:
+        LLGs = mmfct.get_LLGs(system, "precession", fmrFieldFunction)
+    else:
+        LLGs = mmfct.get_LLGs(system, dynamics, fmrFieldFunction)
     n_step = int((tf-t0)/dt)
     N = J0.shape[1]
 
     estimated_bytes = 6 * N * (n_step+1) * 8
+
+    if picard:
+        alpha_S = system.alphaL
+        alpha_L = system.alphaS
+        alpha_LS = system.alphaLS
+        return picard_integrator(J0, tf, dt, LLGs, alpha_S, alpha_L, alpha_LS, tol, max_iter, t0, save_every, normalize_every, omega)
 
     if estimated_bytes > 1e9 or stream:  # ~1 GB threshold
         print("Using streaming RK4")

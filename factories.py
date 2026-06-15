@@ -8,9 +8,10 @@ def make_effective_field(system : MicromagneticSystem):
 
     print("Building effective field")
     bc = system.bc
-
+    N = system.mesh.N
     if system.mesh.dim != 0:
         Nx, Ny, Nz = system.mesh.shape
+
         dx, dy, dz = system.mesh.dx,system.mesh.dy,system.mesh.dz
         Ms = system.Ms
         useSS = False
@@ -188,7 +189,10 @@ def make_effective_field(system : MicromagneticSystem):
         Nx, Ny, Nz = system.mesh.shape
         update_field_demag = make_field_demag(Kxx, Kyy, Kzz, Kxy, Kxz, Kyz, MsS, MsL,Nx, Ny, Nz)
         print("Demag field built")
-    N = system.mesh.N
+    else:
+        zero = np.zeros(Nzz)
+        update_field_demag = make_no_demag(zero)
+
 
 
 
